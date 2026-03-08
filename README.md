@@ -9,3 +9,7 @@
 ### 2. Go to project root directory
 
 `uv sync`
+
+## Tips for running program
+
+### 1. Use `python -m src.main`
