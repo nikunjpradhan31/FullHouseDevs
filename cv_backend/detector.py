@@ -12,7 +12,7 @@ from ultralytics import YOLO
 MODEL_PATH = "./cv_models/yolo26n.onnx"
 
 LOCK_FRAMES = 10            # consecutive frames before a card is locked in
-DEALER_ZONE_RATIO = 0.35    # top 35% of frame height belongs to the dealer zone
+DEALER_ZONE_RATIO = 0.40    # top 35% of frame height belongs to the dealer zone
 MATCH_THRESHOLD_PX = 60     # max pixel distance to match same card across frames
 CONFIDENCE_THRESHOLD = 0.5
 
@@ -86,7 +86,7 @@ class CVPipeline:
 
         self._game_state: dict[str, list[str]] = self._fresh_state()
         self._candidates: list[_Candidate] = []
-        self._locked: set[tuple[str, str]] = set()  # (label, zone)
+        self._locked: list[tuple[str, float, float]] = []  # (label, cx, cy)
 
     # ------------------------------------------------------------------
     # Public API
@@ -149,7 +149,7 @@ class CVPipeline:
         """Clear all game state and tracking. Call this between hands."""
         self._game_state = self._fresh_state()
         self._candidates = []
-        self._locked = set()
+        self._locked = []
         print("[RESET] Game state cleared.")
 
     # ------------------------------------------------------------------
@@ -271,6 +271,23 @@ class CVPipeline:
             x_label = int(slot_width * i) + 10
             cv2.putText(frame, f"PLAYER {player_num}", (x_label, dealer_y + 30), font, 0.8, color, 2)
 
+    def _is_locked(self, label: str, cx: float, cy: float) -> bool:
+        """
+        Return True if a locked card with the same label already exists within
+        MATCH_THRESHOLD_PX of (cx, cy).
+
+        Using position rather than label alone allows multiple physical cards of
+        the same rank/suit (multi-deck games) to each be detected and locked
+        independently, as long as they sit at different locations on the table.
+        """
+        for locked_label, locked_cx, locked_cy in self._locked:
+            if locked_label != label:
+                continue
+            dist = ((cx - locked_cx) ** 2 + (cy - locked_cy) ** 2) ** 0.5
+            if dist < MATCH_THRESHOLD_PX:
+                return True
+        return False
+
     def _process_frame(self, result, frame_height: int, frame_width: int) -> None:
         # --- Parse raw YOLO boxes into (label, cx, cy) ---------------------
         raw: list[tuple[str, float, float]] = []
@@ -285,11 +302,11 @@ class CVPipeline:
         # Zone is assigned from the midpoint, not the individual corners
         paired = self._pair_corners(raw, frame_height, frame_width)
 
-        # --- Skip cards that are already locked in -------------------------
+        # --- Skip detections that match an already-locked card by position --
         detections: list[tuple[str, float, float, str]] = [
             (label, cx, cy, zone)
             for label, cx, cy, zone in paired
-            if (label, zone) not in self._locked
+            if not self._is_locked(label, cx, cy)
         ]
 
         # --- Match existing candidates to detections in this frame ---------
@@ -316,8 +333,8 @@ class CVPipeline:
             candidate.consecutive_frames += 1
 
             if candidate.consecutive_frames >= LOCK_FRAMES:
-                # Lock the card in — add to game state, never track again
-                self._locked.add((label, zone))
+                # Lock the card in by position — add to game state, never track again
+                self._locked.append((label, candidate.cx, candidate.cy))
                 self._game_state[zone].append(label)
                 print(f"[LOCKED] {label} -> {zone} | state: {self._game_state}")
                 self.on_state_update({k: list(v) for k, v in self._game_state.items()})
@@ -343,7 +360,7 @@ def _on_state_update(state: dict[str, list[str]]) -> None:
 
 if __name__ == "__main__":
     pipeline = CVPipeline(
-        num_players=5,
+        num_players=1,
         on_state_update=_on_state_update,
         source=0,       # 0 = default webcam; pass a file path string for a video file
     )
