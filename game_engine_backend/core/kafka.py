@@ -35,7 +35,10 @@ async def consume_messages():
         KAFKA_TOPIC_SIM_RESULTS,
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         group_id="game-engine-group",
-        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        retry_backoff_ms=500, 
+        reconnect_backoff_ms=1000
+
     )
     await consumer.start()
     try:
