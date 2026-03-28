@@ -1,3 +1,4 @@
+import cv2
 from dataclasses import dataclass
 from typing import Callable
 
@@ -10,7 +11,7 @@ from ultralytics import YOLO
 
 MODEL_PATH = "./cv_models/yolo26n.onnx"
 
-LOCK_FRAMES = 15            # consecutive frames before a card is locked in
+LOCK_FRAMES = 10            # consecutive frames before a card is locked in
 DEALER_ZONE_RATIO = 0.35    # top 35% of frame height belongs to the dealer zone
 MATCH_THRESHOLD_PX = 60     # max pixel distance to match same card across frames
 CONFIDENCE_THRESHOLD = 0.5
@@ -18,6 +19,10 @@ CONFIDENCE_THRESHOLD = 0.5
 # Corner-pairing constants (two bounding boxes per physical card)
 PAIR_MIN_DISTANCE_PX = 30   # corners closer than this are treated as duplicates
 PAIR_MAX_DISTANCE_PX = 350  # corners farther than this belong to different cards
+
+# OpenCV capture resolution — camera hardware is forced to this resolution
+CAPTURE_WIDTH = 1280
+CAPTURE_HEIGHT = 720
 
 
 # ------------------------------------------------------------------
@@ -57,6 +62,8 @@ class CVPipeline:
         model_path:       Path to the YOLO .onnx or .pt model file.
         source:           Video source — 0 for default webcam, or a file path string.
         confidence:       Minimum YOLO confidence score to consider a detection.
+        capture_width:    Camera hardware capture width in pixels.
+        capture_height:   Camera hardware capture height in pixels.
     """
 
     def __init__(
@@ -66,12 +73,16 @@ class CVPipeline:
         model_path: str = MODEL_PATH,
         source: int | str = 0,
         confidence: float = CONFIDENCE_THRESHOLD,
+        capture_width: int = CAPTURE_WIDTH,
+        capture_height: int = CAPTURE_HEIGHT,
     ) -> None:
         self.model = YOLO(model_path)
         self.num_players = num_players
         self.on_state_update = on_state_update
         self.source = source
         self.confidence = confidence
+        self.capture_width = capture_width
+        self.capture_height = capture_height
 
         self._game_state: dict[str, list[str]] = self._fresh_state()
         self._candidates: list[_Candidate] = []
@@ -82,17 +93,57 @@ class CVPipeline:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        """Start the pipeline. Blocks until the video source ends or is closed."""
-        results = self.model.predict(
-            source=self.source,
-            stream=True,
-            show=True,
-            conf=self.confidence,
-            verbose=False
-        )
-        for result in results:
-            frame_height, frame_width = result.orig_shape[0], result.orig_shape[1]
-            self._process_frame(result, frame_height, frame_width)
+        """
+        Start the pipeline using OpenCV for capture. Blocks until the source
+        ends or the user presses 'q'.
+
+        The camera hardware is forced to CAPTURE_WIDTH x CAPTURE_HEIGHT so that
+        zone boundaries are computed against the true capture resolution.
+        YOLO inference runs at imgsz=640 internally (faster), and bounding box
+        coordinates are automatically rescaled back to the capture resolution.
+        """
+        cap = cv2.VideoCapture(self.source)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.capture_width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.capture_height)
+
+        if not cap.isOpened():
+            print("Error: Could not open video source.")
+            return
+
+        print("Starting Blackjack Analyzer... Press 'q' to quit.")
+
+        try:
+            while True:
+                success, frame = cap.read()
+                if not success:
+                    print("Failed to grab frame.")
+                    break
+
+                frame_height, frame_width = frame.shape[:2]
+
+                # Run YOLO inference on the captured frame
+                results = self.model.predict(
+                    source=frame,
+                    imgsz=640,
+                    verbose=False,
+                    conf=self.confidence,
+                )
+                result = results[0]
+
+                # Process detections for debouncing and zone assignment
+                self._process_frame(result, frame_height, frame_width)
+
+                # Draw YOLO annotations then our zone overlay on top
+                annotated = result.plot()
+                self._draw_debug_overlay(annotated, frame_height, frame_width)
+                cv2.imshow("Blackjack Analyzer", annotated)
+
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+        finally:
+            cap.release()
+            cv2.destroyAllWindows()
+            print("Pipeline stopped.")
 
     def reset(self) -> None:
         """Clear all game state and tracking. Call this between hands."""
@@ -125,9 +176,9 @@ class CVPipeline:
         Example with 3 players (frame 1920×1080):
             ┌────────────────────────────────────────────────────┐  y = 0
             │                     dealer                         │
-            ├──────────────────┬─────────────────┬──────────────┤  y = 378
-            │    player_3      │    player_2      │   player_1  │
-            └──────────────────┴─────────────────┴──────────────┘  y = 1080
+            ├──────────────────┬─────────────────┬───────────────┤  y = 378
+            │    player_3      │    player_2     │   player_1    │
+            └──────────────────┴─────────────────┴───────────────┘  y = 1080
              x = 0            x = 640           x = 1280       x = 1920
         """
         if cy / frame_height < DEALER_ZONE_RATIO:
@@ -188,6 +239,37 @@ class CVPipeline:
                 merged.append((label, mid_cx, mid_cy, zone))
 
         return merged
+
+    def _draw_debug_overlay(self, frame, frame_height: int, frame_width: int) -> None:
+        """
+        Draw zone boundary lines and labels onto the frame in-place.
+
+        Green horizontal line  — dealer / player boundary
+        Green vertical lines   — player zone boundaries
+        Zone labels            — printed in the top-left corner of each zone
+        """
+        color = (0, 255, 0)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+
+        dealer_y = int(DEALER_ZONE_RATIO * frame_height)
+        slot_width = frame_width / self.num_players
+
+        # Horizontal dealer boundary
+        cv2.line(frame, (0, dealer_y), (frame_width, dealer_y), color, 2)
+
+        # Vertical player zone boundaries
+        for i in range(1, self.num_players):
+            x = int(slot_width * i)
+            cv2.line(frame, (x, dealer_y), (x, frame_height), color, 2)
+
+        # Dealer label
+        cv2.putText(frame, "DEALER", (10, max(dealer_y - 10, 20)), font, 0.8, color, 2)
+
+        # Player labels — rightmost slot = player_1
+        for i in range(self.num_players):
+            player_num = self.num_players - i
+            x_label = int(slot_width * i) + 10
+            cv2.putText(frame, f"PLAYER {player_num}", (x_label, dealer_y + 30), font, 0.8, color, 2)
 
     def _process_frame(self, result, frame_height: int, frame_width: int) -> None:
         # --- Parse raw YOLO boxes into (label, cx, cy) ---------------------
@@ -261,7 +343,7 @@ def _on_state_update(state: dict[str, list[str]]) -> None:
 
 if __name__ == "__main__":
     pipeline = CVPipeline(
-        num_players=2,
+        num_players=5,
         on_state_update=_on_state_update,
         source=0,       # 0 = default webcam; pass a file path string for a video file
     )
