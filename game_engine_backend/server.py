@@ -1,4 +1,6 @@
 import os
+import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from dotenv import load_dotenv
@@ -9,9 +11,31 @@ from core.kafka import (
     start_kafka_consumer, stop_kafka_consumer,
     KAFKA_TOPIC_SIM_REQUESTS
 )
-from models.schemas import SimulationRequest
+from models.schemas import SimulationRequest, GameState, Hand, Card
 
 load_dotenv()
+
+# async def produce_dummy_sim_requests():
+#     while True:
+#         try:
+#             producer = await get_kafka_producer()
+#             dummy_request = SimulationRequest(
+#                 request_id=str(uuid.uuid4()),
+#                 game_state=GameState(
+#                     player_hand=Hand(
+#                         cards=[Card(rank="10", suit="Hearts"), Card(rank="6", suit="Spades")],
+#                         value=16,
+#                         is_soft=False
+#                     ),
+#                     dealer_upcard=Card(rank="10", suit="Diamonds"),
+#                     deck_remaining=52
+#                 )
+#             )
+#             await producer.send_and_wait(KAFKA_TOPIC_SIM_REQUESTS, dummy_request.model_dump())
+#             print(f"Sent dummy simulation request: {dummy_request.model_dump()}")
+#         except Exception as e:
+#             print(f"Error sending dummy sim request: {e}")
+#         await asyncio.sleep(5)
 
 PORT = int(os.getenv("GAME_ENG_BACKEND_PORT", 9093))
 
@@ -20,8 +44,10 @@ async def lifespan(app: FastAPI):
     # Startup
     await get_kafka_producer()
     await start_kafka_consumer()
+    #task = asyncio.create_task(produce_dummy_sim_requests())
     yield
     # Shutdown
+    #task.cancel()
     await stop_kafka_consumer()
     await close_kafka_producer()
 
