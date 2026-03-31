@@ -9,7 +9,7 @@ from ultralytics import YOLO
 # Tunable constants
 # ------------------------------------------------------------------
 
-MODEL_PATH = "./cv_models/yolo26n.onnx"
+MODEL_PATH = "./cv_models/yolo26n_1280.onnx"
 
 LOCK_FRAMES = 10            # consecutive frames before a card is locked in
 DEALER_ZONE_RATIO = 0.40    # top 35% of frame height belongs to the dealer zone
@@ -124,7 +124,7 @@ class CVPipeline:
                 # Run YOLO inference on the captured frame
                 results = self.model.predict(
                     source=frame,
-                    imgsz=640,
+                    imgsz=1280,
                     verbose=False,
                     conf=self.confidence,
                 )
