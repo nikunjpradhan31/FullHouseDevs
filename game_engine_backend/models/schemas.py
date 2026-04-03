@@ -13,7 +13,7 @@ class Hand(BaseModel):
 class GameState(BaseModel):
     player_hand: Hand
     dealer_upcard: Card
-    deck_remaining: Optional[int] = None
+    deck: Optional[List[int]] = None
 
 class SimulationRequest(BaseModel):
     request_id: str
