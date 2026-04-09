@@ -1,12 +1,12 @@
-# Tkinter Webcam Proof of Concept
+# Tkinter GUI
 
-Simple proof of concept showing that a **webcam feed can be displayed inside a Tkinter GUI** using OpenCV.
+This contains directory contains the code for the GUI of the program
 
 ## Requirements
 
 Install the required packages:
 
-I can put the libraries in the repo later, but I have not used uv and am using Conda
+I can put the libraries in the repo later, but I have not used uv and am using Conda.
 
 Used libraries:
 
@@ -16,14 +16,14 @@ Used libraries:
 
 ## Running
 
-Run the script:
+Run the scripts from the root directory:
 
+This is the detection backend that is modified to broadcast the webcam and overlay to the GUI
 ```bash
-python -m socket_broadcast_example.py
+python cv_backend/detector.py
 ```
 
-first, then run:
-
+Next, run the GUI itself.
 ```bash
 python overlay.py
 ```
@@ -32,4 +32,4 @@ A window will open showing the **live webcam stream**.
 
 ## Notes
 
-I am not sure how long the analytics engine will take to gener
+None for now. Let the discord know of any issues.

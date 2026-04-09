@@ -1,8 +1,14 @@
 import cv2
 from dataclasses import dataclass
 from typing import Callable
+import socket
+import struct
 
 from ultralytics import YOLO
+
+# Broadcast settings
+BROADCAST_HOST = "localhost"
+BROADCAST_PORT = 9999
 
 
 # ------------------------------------------------------------------
@@ -88,6 +94,18 @@ class CVPipeline:
         self._candidates: list[_Candidate] = []
         self._locked: list[tuple[str, float, float]] = []  # (label, cx, cy)
 
+        # ----------------------------------------------------------
+        # Webcam broadcast server (for Tkinter client)
+        # ----------------------------------------------------------
+
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind((BROADCAST_HOST, BROADCAST_PORT))
+        self.server_socket.listen(1)
+
+        print(f"Waiting for GUI client at {BROADCAST_HOST}:{BROADCAST_PORT}...")
+        self.conn, addr = self.server_socket.accept()
+        print(f"GUI client connected: {addr}")
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -136,6 +154,8 @@ class CVPipeline:
                 # Draw YOLO annotations then our zone overlay on top
                 annotated = result.plot()
                 self._draw_debug_overlay(annotated, frame_height, frame_width)
+                # broadcast frame to Tkinter GUI
+                self._broadcast_frame(annotated)
                 cv2.imshow("Blackjack Analyzer", annotated)
 
                 if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -143,7 +163,14 @@ class CVPipeline:
         finally:
             cap.release()
             cv2.destroyAllWindows()
-            print("Pipeline stopped.")
+
+            try:
+                self.conn.close()
+                self.server_socket.close()
+            except Exception:
+                pass
+
+    print("Pipeline stopped.")
 
     def reset(self) -> None:
         """Clear all game state and tracking. Call this between hands."""
@@ -161,6 +188,23 @@ class CVPipeline:
         for i in range(1, self.num_players + 1):
             state[f"player_{i}"] = []
         return state
+    
+    # For Broadcasting
+    def _broadcast_frame(self, frame):
+        """
+        Send the annotated frame to the Tkinter GUI client.
+        """
+        try:
+            _, jpeg = cv2.imencode('.jpg', frame)
+            data = jpeg.tobytes()
+
+            # send frame length first
+            self.conn.sendall(struct.pack("!I", len(data)))
+            self.conn.sendall(data)
+
+        except Exception:
+            # client disconnected
+            pass
 
     def _zone_for(self, cy: float, cx: float, frame_height: int, frame_width: int) -> str:
         """
