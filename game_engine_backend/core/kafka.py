@@ -113,7 +113,7 @@ async def process_card_detection(data: dict):
             location = "player"
 
         # Update game state
-        hand_changed = game_state_manager.update_card(card, location)0
+        hand_changed = game_state_manager.update_card(card, location)
 
         # Update Hi-Lo running count
         hi_lo_tracker.update(card)
