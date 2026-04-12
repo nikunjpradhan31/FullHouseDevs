@@ -10,8 +10,6 @@ WEIGHT_DICT = {
     "7": 0, "8": 0, "9": 0
 }
 
-# TODO: incorporate bet amounts when bet API is implemented for actual card counter detection
-ALERT_THRESHOLD = 2 # True count above this means the deck favors the player / flag security to watch table
 NUM_DECKS = 2
 
 # Tracks the Hi-Lo running and true count from live card detections to identify potential card counters
@@ -19,6 +17,8 @@ class HiLoTracker:
     def __init__(self):
         self.running_count = 0
         self.cards_seen = 0
+        self.bet_history = []
+        self.min_bet = 25 # Assuming player is betting with $25 chips
 
     # Called every time a card is detected, regardless of whether it's the dealer's or player's
     def update(self, card: Card):
@@ -37,26 +37,47 @@ class HiLoTracker:
     def true_count(self):
         return self.running_count / self._decks_remaining()
     
-    # True when deck is statistically favorable for the player
-    # Alerts security to watch table - see if true count continues to go up
-    # If so, see if anyone is raising their bets as true count increases
-    @property
-    def alert(self):
-        return self.true_count > ALERT_THRESHOLD
-    
     # Called on shuffle - resets count for new shoe
     def reset(self):
         self.running_count = 0
         self.cards_seen = 0
+        self.bet_history = []
 
-    # Global instance shared across kafka.py and server.py
+    # Keep track of a player's bets over multiple hands to identify a potential card counter
+    def record_bet(self, bet_amount):
+        self.bet_history.append((self.true_count, bet_amount))
+
+    # Checks if player's bets match the Hi-Lo betting formula (true_count - 1) * min_bet
+    # First checks bet spread ratio — real counters spread at least 1:4 (e.g. $25 to $100+)
+    # Then checks if 7 out of 8 rounds match the expected bet within one chip ($25)
+    def is_counting(self):
+        if len(self.bet_history) < 8:
+            return False
+        matches = 0
+        recent = self.bet_history[-8:]
+
+        min_bet_seen = min(bet for _, bet in recent)
+        max_bet_seen = max(bet for _, bet in recent)
+        spread_ratio = max_bet_seen / min_bet_seen if min_bet_seen > 0 else 1
+        if spread_ratio < 4:
+            return False
+        
+        for true_count, bet_amount in recent:
+            expected_bet = (true_count - 1) * self.min_bet
+            if abs(bet_amount - expected_bet) <= self.min_bet:
+                matches += 1
+        return matches >= 7
+
+    # Returns current Hi-Lo state for the /hi-lo API endpoint
     def get_state(self):
         return {
             "running_count": self.running_count,
-            "true_count": round(self.true_count),
+            "true_count": round(self.true_count, 2),
             "cards_seen": self.cards_seen,
-            "decks_remaining": round(self._decks_remaining()),
-            "alert": self.alert
+            "decks_remaining": round(self._decks_remaining(), 2),
+            "bet_history": self.bet_history,
+            "is_counting": self.is_counting()
         }
-    
+
+# Global instance shared across kafka.py and server.py  
 hi_lo_tracker = HiLoTracker()
