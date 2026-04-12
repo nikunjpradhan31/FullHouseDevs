@@ -16,6 +16,7 @@ KAFKA_TOPIC_CARD_DETECTIONS = "card-detections"
 # Message queue for thread-safe sending
 _message_queue = Queue()
 _producer = None
+_server_producer = None
 _loop = None
 _thread = None
 
@@ -99,3 +100,18 @@ def send_card_detection(label: str, zone: str, timestamp: float):
     
     # Add to queue with timestamp
     _message_queue.put((label, zone, timestamp))
+
+async def get_kafka_producer():
+    global _server_producer
+    if _server_producer is None:
+        _server_producer = AIOKafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+            value_serializer=lambda v: json.dumps(v).encode('utf-8')
+        )
+        await _server_producer.start()
+    return _server_producer
+
+async def close_kafka_producer():
+    global _server_producer
+    if _server_producer is not None:
+        await _server_producer.stop()
