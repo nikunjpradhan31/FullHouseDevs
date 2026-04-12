@@ -74,10 +74,12 @@ async def run_simulation(game_state, request_id: str):
         # Create simulation result
         sim_result = SimulationResult(
             request_id=request_id,
-            win_probability=result['actions'][result['optimal_action']]['win_probability'],
-            loss_probability=result['actions'][result['optimal_action']]['lose_probability'],
-            push_probability=result['actions'][result['optimal_action']]['push_probability'],
-            recommended_action=result['optimal_action']
+            player_hand=result['player_hand'],
+            player_hand_value=result['player_hand_value'],
+            dealer_up_card=result['dealer_up_card'],
+            optimal_action=result['optimal_action'],
+            optimal_ev=result['optimal_ev'],
+            actions=result['actions']
         )
 
         # Send result via Kafka
@@ -87,8 +89,8 @@ async def run_simulation(game_state, request_id: str):
             sim_result.model_dump()
         )
 
-        print(f"Simulation completed: {sim_result.recommended_action} "
-                f"(Win: {sim_result.win_probability:.1%})")
+        print(f"Simulation completed: {sim_result.optimal_action} "
+                f"(Win: {sim_result.optimal_ev:.1%})")
 
     except Exception as e:
         print(f"Simulation error: {e}")
