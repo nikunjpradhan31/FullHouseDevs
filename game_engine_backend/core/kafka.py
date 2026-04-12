@@ -90,7 +90,7 @@ async def run_simulation(game_state, request_id: str):
         )
 
         print(f"Simulation completed: {sim_result.optimal_action} "
-                f"(Win: {sim_result.optimal_ev:.1%})")
+                f"(Win: {sim_result.actions[sim_result.optimal_action].win_probability:.1%})")
 
     except Exception as e:
         print(f"Simulation error: {e}")
