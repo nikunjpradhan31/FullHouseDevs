@@ -11,7 +11,7 @@ from core.kafka import (
 )
 from core.game_state_manager import game_state_manager
 from core.hi_lo import hi_lo_tracker
-from models.schemas import GameState
+from models.schemas import GameState, BetRequest
 
 load_dotenv()
 
@@ -48,6 +48,15 @@ async def get_hi_lo():
     """Returns Hi-Lo system state"""
     return hi_lo_tracker.get_state()
 
+@app.post("/bet")
+async def record_bet(request: BetRequest):
+    """Record a player's bet amount for card counter detection"""
+    hi_lo_tracker.record_bet(request.amount)
+    return {
+        "status": "recorded",
+        "true_count": round(hi_lo_tracker.true_count, 2),
+        "bets_recorded": len(hi_lo_tracker.bet_history)
+    }
 
 @app.post("/shuffle")
 async def trigger_shuffle():

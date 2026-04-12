@@ -34,3 +34,6 @@ class SimulationResult(BaseModel):
     optimal_action: str  # hit, stand, double, split
     optimal_ev: float
     actions: dict[str, ActionResult]
+
+class BetRequest(BaseModel):
+    amount: float
