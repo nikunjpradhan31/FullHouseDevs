@@ -20,9 +20,17 @@ class SimulationRequest(BaseModel):
     game_state: GameState
     num_simulations: int = 10000
 
+class ActionResult(BaseModel):
+    win_probability: float
+    lose_probability: float
+    push_probability: float
+    ev: float
+
 class SimulationResult(BaseModel):
     request_id: str
-    win_probability: float
-    loss_probability: float
-    push_probability: float
-    recommended_action: str # hit, stand, double, split
+    player_hand: list[int]
+    player_hand_value: int
+    dealer_up_card: int
+    optimal_action: str  # hit, stand, double, split
+    optimal_ev: float
+    actions: dict[str, ActionResult]
