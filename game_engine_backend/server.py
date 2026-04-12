@@ -10,6 +10,7 @@ from core.kafka import (
     start_kafka_consumer, stop_kafka_consumer,
 )
 from core.game_state_manager import game_state_manager
+from core.hi_lo import hi_lo_tracker
 from models.schemas import GameState
 
 load_dotenv()
@@ -42,10 +43,17 @@ async def get_game_state():
         "dealer_upcard": game_state_manager.get_dealer_upcard().model_dump() if game_state_manager.get_dealer_upcard() else None
     }
 
+@app.get("/hi-lo")
+async def get_hi_lo():
+    """Returns Hi-Lo system state"""
+    return hi_lo_tracker.get_state()
+
+
 @app.post("/shuffle")
 async def trigger_shuffle():
-    """Manually trigger shuffle (resets game state)"""
+    """Manually trigger shuffle (resets game state and Hi-Lo count)"""
     game_state_manager.on_shuffle()
+    hi_lo_tracker.reset()
     return {"status": "shuffled", "phase": game_state_manager.get_current_phase().value}
 
 @app.post("/initial-deal")

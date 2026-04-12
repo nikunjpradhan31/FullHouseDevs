@@ -5,6 +5,7 @@ from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from dotenv import load_dotenv
 from models.schemas import Card, SimulationRequest, SimulationResult
 from core.game_state_manager import game_state_manager
+from core.hi_lo import hi_lo_tracker
 from monte_carlo.blackjackSim import BlackjackSimulator
 
 load_dotenv()
@@ -112,7 +113,10 @@ async def process_card_detection(data: dict):
             location = "player"
 
         # Update game state
-        hand_changed = game_state_manager.update_card(card, location)
+        hand_changed = game_state_manager.update_card(card, location)0
+
+        # Update Hi-Lo running count
+        hi_lo_tracker.update(card)
 
         # Trigger simulation if player hand changed and we're in player turn
         current_phase = game_state_manager.get_current_phase()
