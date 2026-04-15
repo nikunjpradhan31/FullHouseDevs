@@ -23,7 +23,7 @@ This is the detection backend that is modified to broadcast the webcam and overl
 python cv_backend/detector.py
 ```
 
-Next, run the GUI itself.
+Next, run the GUI itself. The detector.py script **MUST** be running before the overlay will work or it will throw an error.
 ```bash
 python overlay.py
 ```
