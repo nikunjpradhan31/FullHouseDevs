@@ -16,14 +16,14 @@ import time
 
 MODEL_PATH = "./cv_models/yolo26n_640.onnx"
 
-LOCK_FRAMES = 1            # consecutive frames before a card is locked in
+LOCK_FRAMES = 5            # consecutive frames before a card is locked in
 DEALER_ZONE_RATIO = 0.40    # top 35% of frame height belongs to the dealer zone
-MATCH_THRESHOLD_PX = 60     # max pixel distance to match same card across frames
-CONFIDENCE_THRESHOLD = 0.1
+MATCH_THRESHOLD_PX = 200     # max pixel distance to match same card across frames
+CONFIDENCE_THRESHOLD = 0.3
 
 # Corner-pairing constants (two bounding boxes per physical card)
 PAIR_MIN_DISTANCE_PX = 10   # corners closer than this are treated as duplicates
-PAIR_MAX_DISTANCE_PX = 500  # corners farther than this belong to different cards
+PAIR_MAX_DISTANCE_PX = 400  # corners farther than this belong to different cards
 
 # OpenCV capture resolution — camera hardware is forced to this resolution
 CAPTURE_WIDTH = 1280
