@@ -12,7 +12,7 @@ class Hand(BaseModel):
 
 class GameState(BaseModel):
     player_hand: Hand
-    dealer_upcard: Card
+    dealer_hand: Hand
     deck: Optional[List[int]] = None
 
 class SimulationRequest(BaseModel):
@@ -34,3 +34,6 @@ class SimulationResult(BaseModel):
     optimal_action: str  # hit, stand, double, split
     optimal_ev: float
     actions: dict[str, ActionResult]
+
+class BetRequest(BaseModel):
+    amount: float
