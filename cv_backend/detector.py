@@ -10,21 +10,26 @@ from ultralytics import YOLO
 BROADCAST_HOST = "localhost"
 BROADCAST_PORT = 9999
 
+#added for kafka for the ability to send card detection to game state manager
+#singular call when a card is locked in
+from core.kafka import send_card_detection
+import time
+
 
 # ------------------------------------------------------------------
 # Tunable constants
 # ------------------------------------------------------------------
 
-MODEL_PATH = "./cv_models/yolo26n_1280.onnx"
+MODEL_PATH = "./cv_models/yolo26n_640.onnx"
 
-LOCK_FRAMES = 10            # consecutive frames before a card is locked in
+LOCK_FRAMES = 5            # consecutive frames before a card is locked in
 DEALER_ZONE_RATIO = 0.40    # top 35% of frame height belongs to the dealer zone
-MATCH_THRESHOLD_PX = 60     # max pixel distance to match same card across frames
-CONFIDENCE_THRESHOLD = 0.5
+MATCH_THRESHOLD_PX = 200     # max pixel distance to match same card across frames
+CONFIDENCE_THRESHOLD = 0.3
 
 # Corner-pairing constants (two bounding boxes per physical card)
-PAIR_MIN_DISTANCE_PX = 30   # corners closer than this are treated as duplicates
-PAIR_MAX_DISTANCE_PX = 350  # corners farther than this belong to different cards
+PAIR_MIN_DISTANCE_PX = 10   # corners closer than this are treated as duplicates
+PAIR_MAX_DISTANCE_PX = 400  # corners farther than this belong to different cards
 
 # OpenCV capture resolution — camera hardware is forced to this resolution
 CAPTURE_WIDTH = 1280
@@ -142,7 +147,7 @@ class CVPipeline:
                 # Run YOLO inference on the captured frame
                 results = self.model.predict(
                     source=frame,
-                    imgsz=1280,
+                    imgsz=640,
                     verbose=False,
                     conf=self.confidence,
                 )
@@ -380,6 +385,10 @@ class CVPipeline:
                 # Lock the card in by position — add to game state, never track again
                 self._locked.append((label, candidate.cx, candidate.cy))
                 self._game_state[zone].append(label)
+
+                #send to kafka
+                send_card_detection(label, zone, time.time())
+
                 print(f"[LOCKED] {label} -> {zone} | state: {self._game_state}")
                 self.on_state_update({k: list(v) for k, v in self._game_state.items()})
             else:
