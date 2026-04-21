@@ -89,5 +89,20 @@ async def trigger_round_complete():
     success = game_state_manager.transition_to(game_state_manager.GamePhase.ROUND_COMPLETE)
     return {"success": success, "phase": game_state_manager.get_current_phase().value}
 
+@app.get("/monte-carlo")
+async def get_monte_carlo_analysis():
+    """Get the latest Monte Carlo simulation results for the current hand"""
+    result = game_state_manager.get_monte_carlo_result()
+    if result:
+        return {
+            "status": "success",
+            "data": result
+        }
+    else:
+        return {
+            "status": "no_analysis",
+            "message": "No Monte Carlo analysis available. Start a hand to generate analysis."
+        }
+
 if __name__ == "__main__":
     uvicorn.run("server:app", host="0.0.0.0", port=PORT, reload=True)
