@@ -3,13 +3,15 @@ import os
 # Add the project root to Python path so we can import from game_engine_backend
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from strategies import RedSevenCount, ReverePointCount, HiLoCount, OmegaIICount, KOCount, KISS3Count
+from strategies import RedSevenCount, ReverePointCount, HiLoCount, OmegaIICount, KOCount, KISS3Count, BasePlayer, NormalPlayer
 from blackjack_simulator import BlackjackGameSimulator
 from game_engine_backend.models.schemas import Card
 from game_engine_backend.core.game_state_manager import build_default_deck, RANK_VALUES, RANKS, SUITS
 from game_engine_backend.monte_carlo.blackjackSim import BlackjackSimulator as MonteCarloSimulator
 import random
 from typing import List, Dict, Tuple, Optional
+import json
+import time
 
 '''
 Simulates each card counting strategy and compares the game engine's performance to flag each strategy against the Monte Carlo EV. 
@@ -32,10 +34,13 @@ Outputs:
 - Total profit before detection
 '''
 
-EV_DEVIATION_THRESHOLD = 0.15  # Flag if cumulative EV deviation per hand exceeds 15% on average
 NUM_DECKS = 6
 MIN_BET = 10
 MAX_BET = 1000
+MIN_DETECTION_ROUNDS = 20
+COUNT_ALIGNMENT_THRESHOLD = 0.6
+RAISED_BET_MINIMUM = 12
+TRUE_COUNT_SIGNAL_THRESHOLD = 1.3
 
 
 # Simulates blackjack rounds with Monte Carlo EV analysis
@@ -45,6 +50,8 @@ def simulate_blackjack():
     monte_carlo = MonteCarloSimulator()
     
     strategies = {
+        'BasePlayer': BasePlayer(),
+        'NormalPlayer': NormalPlayer(),
         'RedSeven': RedSevenCount(),
         'ReverePoint': ReverePointCount(),
         'HiLo': HiLoCount(),
@@ -60,51 +67,73 @@ def simulate_blackjack():
             'total_ev_expected': 0.0,
             'total_ev_actual': 0.0,
             'ev_deviation': 0.0,
-            'hands_played': 0
+            'hands_played': 0,
+            'count_aligned_bets': 0,
+            'count_misaligned_bets': 0,
+            'raised_bet_hands': 0,
+            'raised_bet_true_count_total': 0.0
         }
         for name in strategies.keys()
     }
     
-    for round_num in range(1, 1001):
+    for round_num in range(1, 251):
         # Deal initial hands
         player_hand = [simulator.deal_card(), simulator.deal_card()]
         dealer_hand = [simulator.deal_card(), simulator.deal_card()]
+
+        if simulator.reshuffled:
+            for strategy in strategies.values():
+                if hasattr(strategy, 'reset'):
+                    strategy.reset()
+            simulator.reshuffled = False
         
         # Update strategies with seen cards
         all_cards = player_hand + dealer_hand
         for card in all_cards:
             for strategy in strategies.values():
                 strategy.update(card)
-        
+
+        dealer_upcard_value = RANK_VALUES[dealer_hand[0].rank] if dealer_hand else None
+        player_card_values = [RANK_VALUES[card.rank] for card in player_hand]
+        remaining_deck_values = [RANK_VALUES[card.rank] for card in simulator.deck]
+        try:
+            mc_result = monte_carlo.analyze(
+                player_cards=player_card_values,
+                dealer_up_card=dealer_upcard_value,
+                remaining_deck=remaining_deck_values,
+                num_simulations=10000
+            )
+            optimal_ev_per_unit = mc_result['optimal_ev']
+        except Exception as e:
+            print(f"Error in Monte Carlo for round {round_num}: {e}")
+            optimal_ev_per_unit = 0
+
+        final_player_hand = simulator.play_player_hand(player_hand.copy(), dealer_hand[0])
+        final_dealer_hand = simulator.play_dealer_hand(dealer_hand.copy())
+        winner = simulator.determine_winner(final_player_hand, final_dealer_hand)
+
         # Calculate bets and run Monte Carlo analysis for each strategy
         for name, strategy in strategies.items():
-            if results[name]['rounds_to_threshold'] is not None:
+            if name != 'BasePlayer' and results[name]['rounds_to_threshold'] is not None:
                 continue  # Skip if already flagged
-                
-            bet_amount = simulator.calculate_bet_amount(strategy, MIN_BET, MAX_BET)
+            if hasattr(strategy, 'get_bet'):
+                bet_amount = strategy.get_bet(MIN_BET, MAX_BET)
+            else:
+                bet_amount = simulator.calculate_bet_amount(strategy, MIN_BET, MAX_BET)
             results[name]['hands_played'] += 1
-            
-            # Run Monte Carlo simulation to get expected value
-            dealer_upcard_value = RANK_VALUES[dealer_hand[0].rank] if dealer_hand else None
-            player_card_values = [RANK_VALUES[card.rank] for card in player_hand]
-            remaining_deck_values = [RANK_VALUES[card.rank] for card in simulator.deck]
-            try:
-                mc_result = monte_carlo.analyze(
-                    player_cards=player_card_values,
-                    dealer_up_card=dealer_upcard_value,
-                    remaining_deck=remaining_deck_values,
-                    num_simulations=10000
-                )
-                expected_ev = mc_result['optimal_ev'] * bet_amount
-                results[name]['total_ev_expected'] += expected_ev
-            except Exception as e:
-                print(f"Error in Monte Carlo for {name}: {e}")
-                expected_ev = 0
-            
-            # Play out the hand
-            final_player_hand = simulator.play_player_hand(player_hand.copy(), dealer_hand[0])
-            final_dealer_hand = simulator.play_dealer_hand(dealer_hand.copy())
-            winner = simulator.determine_winner(final_player_hand, final_dealer_hand)
+
+            bet_multiple = bet_amount / MIN_BET if MIN_BET else 1
+            true_count = getattr(strategy, 'true_count', 0)
+            if bet_multiple > 1:
+                results[name]['raised_bet_hands'] += 1
+                results[name]['raised_bet_true_count_total'] += true_count
+                if true_count > 0:
+                    results[name]['count_aligned_bets'] += 1
+                else:
+                    results[name]['count_misaligned_bets'] += 1
+
+            expected_ev = optimal_ev_per_unit * bet_amount
+            results[name]['total_ev_expected'] += expected_ev
             
             # Calculate actual profit/loss
             if winner == "player":
@@ -113,46 +142,85 @@ def simulate_blackjack():
                 profit = -bet_amount
             else:  # push
                 profit = 0
-            
+
+            if name == 'NormalPlayer':
+                strategy.update_result(winner)
+
             results[name]['total_profit'] += profit
             results[name]['total_ev_actual'] += profit
             
             # Calculate EV deviation for this hand
             ev_dev = profit - expected_ev
             results[name]['ev_deviation'] += ev_dev
-            
+
             # Check if strategy should be flagged (EV deviation indicates card counting)
-            if round_num > 20:
+            if name != 'BasePlayer' and round_num >= MIN_DETECTION_ROUNDS:
                 avg_ev_dev = results[name]['ev_deviation'] / results[name]['hands_played']
-                # Flag if cumulative EV deviation is significant (more hands won than expected)
-                if avg_ev_dev > EV_DEVIATION_THRESHOLD:
+                raised_bet_hands = results[name]['raised_bet_hands']
+                count_alignment_rate = (
+                    results[name]['count_aligned_bets'] / raised_bet_hands
+                    if raised_bet_hands > 0 else 0.0
+                )
+                avg_true_count_on_raised_bets = (
+                    results[name]['raised_bet_true_count_total'] / raised_bet_hands
+                    if raised_bet_hands > 0 else 0.0
+                )
+                if (
+                    raised_bet_hands >= RAISED_BET_MINIMUM
+                    and count_alignment_rate >= COUNT_ALIGNMENT_THRESHOLD
+                    and avg_true_count_on_raised_bets >= TRUE_COUNT_SIGNAL_THRESHOLD
+                ):
                     results[name]['rounds_to_threshold'] = round_num
-                    print(f"{name} flagged at round {round_num} with avg EV dev: {avg_ev_dev:.4f}")
+                    print(
+                        f"{name} flagged at round {round_num} with avg EV dev: {avg_ev_dev:.4f}, "
+                        f"count-aligned betting rate {count_alignment_rate:.4f}, and "
+                        f"avg true count on raised bets {avg_true_count_on_raised_bets:.4f}."
+                    )
     return results
 
 if __name__ == "__main__":
     results = simulate_blackjack()
-    
+    for strategy_name, data in results.items():
+        hands = data.get('hands_played', 0)
+        dev = data.get('ev_deviation', 0)
+        data['avg_ev_dev_per_hand'] = dev / hands if hands > 0 else 0
+        raised_bet_hands = data.get('raised_bet_hands', 0)
+        data['count_alignment_rate'] = (
+            data['count_aligned_bets'] / raised_bet_hands if raised_bet_hands > 0 else 0
+        )
+        data['avg_true_count_on_raised_bets'] = (
+            data['raised_bet_true_count_total'] / raised_bet_hands
+            if raised_bet_hands > 0 else 0
+        )
+
     print("Strategy Detection Results (Monte Carlo EV Analysis):")
     print("=" * 70)
     for strategy_name, data in results.items():
-        rounds = data['rounds_to_threshold']
-        total_profit = data['total_profit']
-        total_ev_expected = data['total_ev_expected']
-        total_ev_actual = data['total_ev_actual']
-        ev_deviation = data['ev_deviation']
-        hands_played = data['hands_played']
-        
-        avg_ev_dev = ev_deviation / hands_played if hands_played > 0 else 0
-        
         print(f"\n{strategy_name}:")
-        print(f"  Hands Played: {hands_played}")
-        if rounds:
-            print(f" !! FLAGGED at round {rounds}")
+        print(f"  Hands Played: {data['hands_played']}")
+        if data['rounds_to_threshold']:
+            print(f" !! FLAGGED at round {data['rounds_to_threshold']}")
         else:
-            print(f"  ✓ Not detected after 1000 hands")
-        print(f"  Total Profit: ${total_profit:.2f}")
-        print(f"  Expected EV: ${total_ev_expected:.2f}")
-        print(f"  Actual EV: ${total_ev_actual:.2f}")
-        print(f"  EV Deviation: ${ev_deviation:.2f}")
-        print(f"  Avg Deviation/Hand: ${avg_ev_dev:.4f}")
+            print(f"  ✓ Not detected after 250 hands")
+        print(f"  Total Profit: ${data['total_profit']:.2f}")
+        print(f"  Expected EV: ${data['total_ev_expected']:.2f}")
+        print(f"  Actual EV: ${data['total_ev_actual']:.2f}")
+        print(f"  EV Deviation: ${data['ev_deviation']:.2f}")
+        print(f"  Avg Deviation/Hand: ${data['avg_ev_dev_per_hand']:.4f}")
+        print(f"  Raised Bet Hands: {data['raised_bet_hands']}")
+        print(f"  Count Alignment Rate: {data['count_alignment_rate']:.4f}")
+        print(f"  Avg True Count On Raised Bets: {data['avg_true_count_on_raised_bets']:.4f}")
+        
+    output_dir = "simulations/results"
+    timestamp = int(time.time())
+    file_name = f"blackjack_results_{timestamp}.json"
+    file_path = os.path.join(output_dir, file_name)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    try:
+        with open(file_path, "w") as f:
+            json.dump(results, f, indent=4)
+        print(f"\nSuccessfully exported results to {file_path}")
+    except Exception as e:
+        print(f"Error saving JSON: {e}")

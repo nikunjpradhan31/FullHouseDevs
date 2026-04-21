@@ -13,6 +13,7 @@ class BlackjackGameSimulator:
         self.min_bet = min_bet
         self.max_bet = max_bet
         self.deck = self._build_deck()
+        self.reshuffled = False
         self.shuffle_deck()
         
     def _build_deck(self) -> List[Card]:
@@ -33,6 +34,7 @@ class BlackjackGameSimulator:
         if len(self.deck) < 52:  # Reshuffle when less than 1 deck remains
             self.deck = self._build_deck()
             self.shuffle_deck()
+            self.reshuffled = True
         return self.deck.pop()
     
     def calculate_hand_value(self, hand: List[Card]) -> Tuple[int, bool]:
