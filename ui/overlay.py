@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import threading
 import json
+import requests
 from kafka import KafkaConsumer
 
 # -----------------------------
@@ -38,7 +39,6 @@ root = tk.Tk()
 root.title("Blackjack Analyzer Dashboard")
 root.geometry("1400x900")
 
-# Layout frames
 video_frame = tk.Frame(root)
 video_frame.pack(side="right", padx=10, pady=10)
 
@@ -52,7 +52,7 @@ analytics_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 video_label = tk.Label(video_frame)
 video_label.pack()
 
-WEBCAM_WIDTH = 960 # slightly smaller but proportional
+WEBCAM_WIDTH = 960
 WEBCAM_HEIGHT = 540
 
 def update_frame():
@@ -74,8 +74,6 @@ def update_frame():
         nparr = np.frombuffer(data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # resize for smaller display
         frame = cv2.resize(frame, (WEBCAM_WIDTH, WEBCAM_HEIGHT))
 
         img = Image.fromarray(frame)
@@ -97,7 +95,6 @@ title = tk.Label(
 )
 title.pack(pady=10)
 
-# Dealer section
 dealer_label = tk.Label(
     analytics_frame,
     text="Dealer Upcard: ---",
@@ -105,18 +102,17 @@ dealer_label = tk.Label(
 )
 dealer_label.pack(pady=5)
 
-# Players container
 players_frame = tk.Frame(analytics_frame)
 players_frame.pack(pady=10, fill="x")
 
-player_boxes = {}  # dictionary to hold each player GUI frame
+player_boxes = {}
 
 # -----------------------------
 # Recommendation section
 # -----------------------------
 
 recommendation_frame = tk.Frame(analytics_frame)
-recommendation_frame.pack(pady=30)
+recommendation_frame.pack(pady=20)
 
 recommended_move_label = tk.Label(
     recommendation_frame,
@@ -133,31 +129,81 @@ ev_label = tk.Label(
 ev_label.pack(pady=5)
 
 # -----------------------------
-# Kafka listener thread
+# BETTING UI (NEW)
+# -----------------------------
+
+bet_frame = tk.Frame(analytics_frame)
+bet_frame.pack(pady=20)
+
+bet_title = tk.Label(
+    bet_frame,
+    text="Place Bet",
+    font=("Arial", 18, "bold")
+)
+bet_title.pack()
+
+bet_entry = tk.Entry(bet_frame, font=("Arial", 14))
+bet_entry.pack(pady=5)
+
+bet_status_label = tk.Label(
+    bet_frame,
+    text="Status: ---",
+    font=("Arial", 14)
+)
+bet_status_label.pack(pady=5)
+
+def submit_bet():
+    try:
+        amount = float(bet_entry.get())
+
+        response = requests.post(
+            "http://localhost:9093/bet",
+            json={"amount": amount}
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            bet_status_label.config(
+                text=f"Recorded | True Count: {data['true_count']}"
+            )
+        else:
+            bet_status_label.config(text="Error submitting bet")
+
+    except ValueError:
+        bet_status_label.config(text="Invalid bet amount")
+    except Exception as e:
+        bet_status_label.config(text=f"Error: {str(e)}")
+
+bet_button = tk.Button(
+    bet_frame,
+    text="Submit Bet",
+    font=("Arial", 14),
+    command=submit_bet
+)
+bet_button.pack(pady=5)
+
+# -----------------------------
+# Kafka listener
 # -----------------------------
 
 def kafka_listener():
     for message in consumer:
         data = message.value
-        print("Kafka message received:", data)
         root.after(0, update_analytics, data)
 
 # -----------------------------
-# Update GUI from Kafka data
+# Analytics update
 # -----------------------------
 
 def update_analytics(data):
 
-    # Dealer
     if "dealer_up_card" in data:
         dealer_label.config(text=f"Dealer Upcard: {data['dealer_up_card']}")
 
-    # Ensure at least one player
-    players = data.get("players", [data])  # fallback to single if not in list
+    players = data.get("players", [data])
 
     for i, player_data in enumerate(players, start=1):
         if i not in player_boxes:
-            # Create a new player box
             box = tk.LabelFrame(players_frame, text=f"Player {i}", padx=10, pady=10)
             box.pack(fill="x", pady=5)
 
@@ -173,7 +219,6 @@ def update_analytics(data):
             optimal_action_label = tk.Label(box, text="Optimal Action: ---", font=("Arial", 14))
             optimal_action_label.pack(anchor="w")
 
-            # store for updating
             player_boxes[i] = {
                 "cards": cards_label,
                 "count": count_label,
@@ -181,14 +226,12 @@ def update_analytics(data):
                 "optimal_action": optimal_action_label
             }
 
-        # Update labels
         box_data = player_boxes[i]
         box_data["cards"].config(text=f"Cards: {player_data.get('player_hand', [])}")
         box_data["count"].config(text=f"Hand Value: {player_data.get('player_hand_value', '---')}")
         box_data["ev"].config(text=f"EV: {player_data.get('optimal_ev', '---')}")
         box_data["optimal_action"].config(text=f"Optimal Action: {player_data.get('optimal_action', '---')}")
 
-    # Update recommendation
     if "recommended_move" in data:
         recommended_move_label.config(text=f"Recommended Move: {data['recommended_move']}")
     if "expected_value" in data:
