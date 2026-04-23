@@ -9,7 +9,7 @@ import uvicorn
 from core.kafka import (
     start_kafka_consumer, stop_kafka_consumer,
 )
-from core.game_state_manager import game_state_manager
+from core.game_state_manager import game_state_manager, GamePhase
 from core.hi_lo import hi_lo_tracker
 from models.schemas import GameState, BetRequest
 
@@ -68,25 +68,25 @@ async def trigger_shuffle():
 @app.post("/initial-deal")
 async def trigger_initial_deal():
     """Transition to initial deal phase"""
-    success = game_state_manager.transition_to(game_state_manager.GamePhase.INITIAL_DEAL)
+    success = game_state_manager.transition_to(GamePhase.INITIAL_DEAL)
     return {"success": success, "phase": game_state_manager.get_current_phase().value}
 
 @app.post("/player-turn")
 async def trigger_player_turn():
     """Transition to player turn phase"""
-    success = game_state_manager.transition_to(game_state_manager.GamePhase.PLAYER_TURN)
+    success = game_state_manager.transition_to(GamePhase.PLAYER_TURN)
     return {"success": success, "phase": game_state_manager.get_current_phase().value}
 
 @app.post("/dealer-turn")
 async def trigger_dealer_turn():
     """Transition to dealer turn phase"""
-    success = game_state_manager.transition_to(game_state_manager.GamePhase.DEALER_TURN)
+    success = game_state_manager.transition_to(game_state_manager.GamePhase.ROUND_COMPLETE)
     return {"success": success, "phase": game_state_manager.get_current_phase().value}
 
 @app.post("/round-complete")
 async def trigger_round_complete():
     """Transition to round complete phase"""
-    success = game_state_manager.transition_to(game_state_manager.GamePhase.ROUND_COMPLETE)
+    success = game_state_manager.transition_to(GamePhase.ROUND_COMPLETE)
     return {"success": success, "phase": game_state_manager.get_current_phase().value}
 
 if __name__ == "__main__":

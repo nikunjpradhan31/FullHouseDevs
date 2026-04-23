@@ -7,6 +7,7 @@ from models.schemas import Card, SimulationRequest, SimulationResult
 from core.game_state_manager import game_state_manager
 from core.hi_lo import hi_lo_tracker
 from monte_carlo.blackjackSim import BlackjackSimulator
+import traceback
 
 load_dotenv()
 
@@ -49,25 +50,56 @@ async def run_simulation(game_state, request_id: str):
     try:
         simulator = BlackjackSimulator()
 
-        # Convert game state to simulator format
-        player_cards = [card.rank for card in game_state.player_hand.cards]
-        dealer_up_card = game_state_manager.get_dealer_upcard()
+        # this was an issue with that face suits were passed as letters to a simulation that uses only numbers, causing a type error
+        RANK_TO_VALUE = {
+            "11": 11,
+            "A": 11,
+            "K": 10,
+            "Q": 10,
+            "J": 10,
+            "10": 10,
+            "9": 9,
+            "8": 8,
+            "7": 7,
+            "6": 6,
+            "5": 5,
+            "4": 4,
+            "3": 3,
+            "2": 2,
+        }
+        print(game_state.player_hand.cards)
+
+        player_cards = [
+            int(RANK_TO_VALUE[str(card.rank)])
+            for card in game_state.player_hand.cards
+        ]
+
+        dealer_up_card_obj = game_state_manager.get_dealer_upcard()
 
         if not player_cards:
             print("Cannot run simulation: no player cards")
             return
 
-        if dealer_up_card is None:
+        if dealer_up_card_obj is None:
             print("Cannot run simulation: no dealer upcard")
             return
 
-        dealer_up_card_rank = dealer_up_card.rank
+        dealer_up_card = int(RANK_TO_VALUE[str(dealer_up_card_obj.rank)])
 
+        remaining_deck = None
+        if game_state.deck:
+            remaining_deck = [
+                RANK_TO_VALUE[c.rank] if hasattr(c, "rank") else RANK_TO_VALUE[str(c)]
+                for c in game_state.deck
+            ]
+
+        player_cards = list(map(int, player_cards))
+        dealer_up_card = int(dealer_up_card)
         # Run analysis
         result = simulator.analyze(
             player_cards=player_cards,
-            dealer_up_card=dealer_up_card_rank,
-            remaining_deck=game_state.deck,
+            dealer_up_card=dealer_up_card,
+            remaining_deck=remaining_deck,
             num_simulations=10000
         )
 
@@ -89,11 +121,15 @@ async def run_simulation(game_state, request_id: str):
             sim_result.model_dump()
         )
 
-        print(f"Simulation completed: {sim_result.optimal_action} "
-                f"(Win: {sim_result.actions[sim_result.optimal_action].win_probability:.1%})")
+        print(
+            f"Simulation completed: {sim_result.optimal_action} "
+            f"(Win: {sim_result.actions[sim_result.optimal_action].win_probability:.1%})"
+        )
+
 
     except Exception as e:
-        print(f"Simulation error: {e}")
+        print("🔥 Simulation error occurred")
+        traceback.print_exc()
 
 async def process_card_detection(data: dict):
     """Process a card detection message from CV backend"""
@@ -125,6 +161,9 @@ async def process_card_detection(data: dict):
         if hand_changed and current_phase.value == "player_turn":
             timestamp = data.get("timestamp", 0)
             request_id = f"req_{timestamp}_{len(game_state_manager.game_state.player_hand.cards)}"
+            print("SIMULATION TRIGGER CHECK:",
+                hand_changed,
+                current_phase.value)
             await run_simulation(game_state_manager.game_state, request_id)
 
         # Check dealer status if card was dealt to dealer during dealer turn
