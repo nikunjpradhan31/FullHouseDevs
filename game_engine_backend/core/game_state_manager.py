@@ -1,6 +1,7 @@
-from typing import Optional, List
-from models.schemas import GameState, Hand, Card
+from typing import Optional, List, Dict, Any
+from game_engine_backend.models.schemas import GameState, Hand, Card
 from enum import Enum
+from game_engine_backend.monte_carlo.blackjackSim import BlackjackSimulator
 
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 SUITS = ["Hearts", "Diamonds", "Clubs", "Spades"]
@@ -61,6 +62,8 @@ class GameStateManager:
     def __init__(self):
         self.current_phase = GamePhase.IDLE
         self.game_state: Optional[GameState] = None
+        self.monte_carlo = BlackjackSimulator()
+        self.monte_carlo_result: Optional[Dict[str, Any]] = None
 
     def update_card(self, card: Card, location: str) -> bool:
         """
@@ -126,6 +129,9 @@ class GameStateManager:
             dealer_hand=dealer_hand,
             deck=current_deck
         )
+
+        if hand_changed and self.current_phase == GamePhase.PLAYER_TURN:
+            self._run_monte_carlo_simulation()
 
         return hand_changed
 
@@ -197,6 +203,8 @@ class GameStateManager:
         and dealer. This phase represents the start of a new hand.
         """
         self.transition_to(GamePhase.INITIAL_DEAL)
+        if self.game_state and len(self.game_state.player_hand.cards) == 2 and len(self.game_state.dealer_hand.cards) >= 1:
+            self._run_monte_carlo_simulation()
 
     def on_player_turn(self):
         """
@@ -207,6 +215,8 @@ class GameStateManager:
         will trigger Monte Carlo simulations.
         """
         self.transition_to(GamePhase.PLAYER_TURN)
+        if self.game_state and len(self.game_state.player_hand.cards) >= 2:
+            self._run_monte_carlo_simulation()
 
     def on_dealer_turn(self):
         """
@@ -363,6 +373,50 @@ class GameStateManager:
             value -= 10
             aces -= 1
         return aces > 0
+
+    def _run_monte_carlo_simulation(self) -> None:
+        """
+        Run the Monte Carlo simulation for the current game state.
+
+        Analyzes all possible actions (hit, stand, double, split) and determines
+        the optimal action based on expected value. Results are stored in
+        self.monte_carlo_result.
+        """
+        if not self.game_state:
+            return
+
+        # Convert card objects to values for Monte Carlo
+        player_values = [RANK_VALUES[card.rank] for card in self.game_state.player_hand.cards]
+        dealer_upcard = None
+        
+        if self.game_state.dealer_hand.cards:
+            dealer_upcard = RANK_VALUES[self.game_state.dealer_hand.cards[0].rank]
+        
+        if not player_values or dealer_upcard is None:
+            return
+
+        try:
+            self.monte_carlo_result = self.monte_carlo.analyze(
+                player_cards=player_values,
+                dealer_up_card=dealer_upcard,
+                remaining_deck=self.game_state.deck,
+                num_simulations=100000
+            )
+            print(f"Monte Carlo simulation complete: Optimal action = {self.monte_carlo_result.get('optimal_action')}")
+        except Exception as e:
+            print(f"Error running Monte Carlo simulation: {e}")
+            self.monte_carlo_result = None
+
+    def get_monte_carlo_result(self) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve the most recent Monte Carlo simulation results.
+
+        Returns:
+            Optional[Dict[str, Any]]: The simulation results including player hand,
+                dealer upcard, probabilities for each action, and optimal action.
+                Returns None if no simulation has been run yet.
+        """
+        return self.monte_carlo_result
 
 
 game_state_manager = GameStateManager()
